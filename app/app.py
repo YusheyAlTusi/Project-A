@@ -1,71 +1,56 @@
-from flask import Flask, request, Response 
-from flask_uploads import UploadSet, IMAGES, configure_uploads
-import jsonpickle
-import pickle
-from sklearn import preprocessing, svm
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LinearRegression
+from flask import Flask, render_template, request
+import pandas as pd
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import AgglomerativeClustering
+import matplotlib.pyplot as plt
+import seaborn as sns
+import io
+import base64
 
 app = Flask(__name__)
 
-# Load the pickled data and store it in a global variable
-with open('finalized_model.sav', 'rb') as f:
-    model = pickle.load(f)
+@app.route('/')
+def index():
+    return render_template('index.html')
 
+@app.route('/cluster', methods=['POST'])
+def cluster():
+    # Read uploaded file and selected columns
+    file = request.files['data_file']
+    columns = request.form.getlist('columns')
+    n_clusters = int(request.form['n_clusters'])
 
-# Configure the app to store uploaded files in the 'uploads' folder
-app.config['UPLOADS_DEFAULT_DEST'] = 'vol1'
+    # Read data into a Pandas DataFrame
+    data = pd.read_csv(io.StringIO(file.stream.read().decode("UTF8")), usecols=columns)
 
-# Create an UploadSet for handling image uploads
-images = UploadSet('images', IMAGES)
+    # Preprocess the data
+    data.dropna(inplace=True)
+    data.drop_duplicates(inplace=True)
 
-# Configure the Flask-Uploads extension
-configure_uploads(app, (images,))
+    # Convert gender column to numeric values
+    data["Gender"] = data["Gender"].map({"Female": 0, "Male": 1})
 
-filename = ''
+    # Scale the data
+    scaler = StandardScaler()
+    data_scaled = scaler.fit_transform(data)
 
+    # Perform hierarchical clustering
+    model = AgglomerativeClustering(n_clusters=n_clusters, linkage='ward')
+    y = model.fit_predict(data_scaled)
 
+    # Visualize the clusters
+    fig, ax = plt.subplots()
+    sns.scatterplot(x=data.iloc[:, 0], y=data.iloc[:, 1], hue=y, palette='deep', ax=ax)
+    ax.set_title(f"Hierarchical Clustering with {n_clusters} Clusters")
 
+    # Encode the visualization as base64 for display on the webpage
+    buffer = io.BytesIO()
+    plt.savefig(buffer, format='png')
+    buffer.seek(0)
+    image_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8').replace('\n', '')
+    buffer.close()
 
+    return render_template('cluster.html', image_base64=image_base64)
 
-
-@app.route('/api/test', methods=['GET'])
-def test():
-    # Model code
-    response = {'message': 'API hit iimv'}
-    # encode response using jsonpickle
-    response_pickled = jsonpickle.encode(response)
-
-    return Response(response=response_pickled, status=200, mimetype="application/json")
-
-
-
-
-
-@app.route('/api/testmodel', methods=['POST'])
-def process_form():
-    data = request.form
-    data = model.predict([[float(data['testdata'])]])  
-    data_str = ", ".join(str(x) for x in data)
-    return data_str
-
-
-@app.route('/api/upload', methods=['POST'])
-def upload():
-    # Check if a file was uploaded
-    if 'image' not in request.files:
-        return 'No file uploaded', 400
-
-    # Save the uploaded file
-    filename = images.save(request.files['image'])
-    
-
-    # Return the filename of the saved file
-    return filename, 200
-
-
-
-
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+if __name__ == '__main__':
+    app.run(debug=True)
