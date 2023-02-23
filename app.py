@@ -53,4 +53,4 @@ def cluster():
     return render_template('cluster.html', image_base64=image_base64)
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host='64.227.180.149', port=22)
